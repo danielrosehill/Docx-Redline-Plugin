@@ -10,6 +10,7 @@
   docx.py apply FILE EDITS.json -o OUT --author NAME
   docx.py verify ORIGINAL OUT                        rejecting all changes must give ORIGINAL's text
   docx.py accept|reject FILE -o OUT                  resolve every tracked change
+  docx.py check-rtl FILE                             Hebrew/Arabic runs not marked right-to-left
   docx.py pdf FILE [-o DIR]                          render with LibreOffice
 
 EDITS.json is a list; each find must match exactly once:
@@ -56,6 +57,19 @@ def rtl_comments(path):
     tmp.replace(path)
 
 
+def rtl_gaps(path):
+    """RTL-script runs without w:rtl, as (is_insertion, text). Styles may supply it for old runs."""
+    x = zipfile.ZipFile(path).read("word/document.xml").decode()
+    ins = [(m.start(), m.end()) for m in re.finditer(r"<w:ins\b[^>/]*>.*?</w:ins>", x, re.S)]
+    out = []
+    for m in re.finditer(r"<w:r(?: [^>]*)?>.*?</w:r>", x, re.S):
+        t = "".join(re.findall(r"<w:t(?: [^>]*)?>([^<]*)", m[0]))
+        on = re.search(r"<w:rtl(?:/>| w:val=\"(?:1|true|on)\")", m[0])
+        if RTL.search(t) and not on:
+            out.append((any(a <= m.start() < b for a, b in ins), t))
+    return out
+
+
 def unique(d, s):
     n = d.count_matches(s)
     if n != 1: sys.exit(f"find must match exactly once, matched {n}: {s!r}")
@@ -78,6 +92,8 @@ def apply(src, edits, out, author):
                 else: sys.exit(f"unknown op {op}")
             d.save()
         rtl_comments(out)
+        bad = [t for i, t in rtl_gaps(out) if i and t not in {u for j, u in rtl_gaps(src) if j}]
+        if bad: sys.exit(f"inserted RTL text lost its direction: {bad}")
     except BaseException:
         out.unlink(missing_ok=True); raise
     verify(src, out)
@@ -98,11 +114,17 @@ def main():
     q = s.add_parser("verify"); q.add_argument("f"); q.add_argument("out")
     for c in ("accept", "reject"):
         q = s.add_parser(c); q.add_argument("f"); q.add_argument("-o", required=True)
+    q = s.add_parser("check-rtl"); q.add_argument("f")
     q = s.add_parser("pdf"); q.add_argument("f"); q.add_argument("-o", default=".")
     a = p.parse_args()
     if a.c == "show": print(text(a.f, a.view))
     elif a.c == "apply": apply(a.f, a.edits, a.o, a.author)
     elif a.c == "verify": verify(a.f, a.out)
+    elif a.c == "check-rtl":
+        g = rtl_gaps(a.f)
+        for i, t in g: print("INSERTED" if i else "existing", repr(t[:80]))
+        print(len(g), "RTL-script runs without a run-level w:rtl")
+        sys.exit(1 if any(i for i, _ in g) else 0)
     elif a.c == "pdf":
         with tempfile.TemporaryDirectory() as t:
             subprocess.run(["soffice", f"-env:UserInstallation=file://{t}", "--headless", "--convert-to", "pdf",

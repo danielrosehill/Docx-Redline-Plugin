@@ -6,6 +6,7 @@ Work with Word `.docx` files from an AI agent on Linux or macOS, without Microso
 
 - `read-docx` -- read text, tracked changes and comments; render to PDF
 - `redline-docx` -- apply edits as tracked changes and comments, with an automatic check
+- `rtl-docx` -- Hebrew, Arabic and other right-to-left documents
 - `finalise-docx` -- accept or reject everything into a clean copy
 
 `scripts/docx.py` is a standalone CLI (`uv` only; LibreOffice Writer (`libreoffice-writer`) for PDF).
